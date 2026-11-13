@@ -1,0 +1,734 @@
+
+#include <SDL2/SDL.h>
+#include <vpad/input.h>
+#include <string.h>
+
+#define SCREEN_W 1280
+#define SCREEN_H 720
+#define GROUND_Y 588
+#define LEVEL_W 5900
+#define PLAYER_W 48
+#define PLAYER_H 96
+#define SPRITE_COUNT 7
+#define COIN_COUNT 18
+
+static const char *glyph(char c)
+{
+    switch (c) {
+    case 'A': return "01110100011000111111100011000110001";
+    case 'B': return "11110100011000111110100011000111110";
+    case 'C': return "01111100001000010000100001000001111";
+    case 'D': return "11110100011000110001100011000111110";
+    case 'E': return "11111100001000011110100001000011111";
+    case 'F': return "11111100001000011110100001000010000";
+    case 'G': return "01111100001000010111100011000101111";
+    case 'H': return "10001100011000111111100011000110001";
+    case 'I': return "11111001000010000100001000010011111";
+    case 'J': return "00111000100001000010100101001001100";
+    case 'K': return "10001100101010011000101001001010001";
+    case 'L': return "10000100001000010000100001000011111";
+    case 'M': return "10001110111010110101100011000110001";
+    case 'N': return "10001110011010110011100011000110001";
+    case 'O': return "01110100011000110001100011000101110";
+    case 'P': return "11110100011000111110100001000010000";
+    case 'Q': return "01110100011000110001101011001001101";
+    case 'R': return "11110100011000111110101001001010001";
+    case 'S': return "01111100001000001110000010000111110";
+    case 'T': return "11111001000010000100001000010000100";
+    case 'U': return "10001100011000110001100011000101110";
+    case 'V': return "10001100011000110001100010101000100";
+    case 'W': return "10001100011000110101101011101110001";
+    case 'X': return "10001100010101000100010101000110001";
+    case 'Y': return "10001100010101000100001000010000100";
+    case 'Z': return "11111000010001000100010001000011111";
+    case '0': return "01110100011001110101110011000101110";
+    case '1': return "00100011000010000100001000010001110";
+    case '2': return "01110100010000100010001000100011111";
+    case '3': return "11110000010000101110000010000111110";
+    case '4': return "00010001100101010010111110001000010";
+    case '5': return "11111100001000011110000010000111110";
+    case '6': return "01111100001000011110100011000101110";
+    case '7': return "11111000010001000100010000100001000";
+    case '8': return "01110100011000101110100011000101110";
+    case '9': return "01110100011000101111000010000111110";
+    case '-': return "00000000000000011111000000000000000";
+    case ':': return "00000001000010000000001000010000000";
+    case '?': return "01110100010001000100000000000000100";
+    case '!': return "00100001000010000100001000000000100";
+    case '.': return "00000000000000000000000000000000100";
+    default: return NULL;
+    }
+}
+
+static void fill(SDL_Renderer *r, int x, int y, int w, int h,
+                 Uint8 red, Uint8 green, Uint8 blue)
+{
+    SDL_Rect rect = {x, y, w, h};
+    SDL_SetRenderDrawColor(r, red, green, blue, 255);
+    SDL_RenderFillRect(r, &rect);
+}
+
+static void drawText(SDL_Renderer *r, const char *s, int x, int y, int scale)
+{
+    for (; *s; s++, x += 6 * scale) {
+        const char *g = glyph(*s);
+        if (!g) continue;
+        for (int row = 0; row < 7; row++) {
+            for (int col = 0; col < 5; col++) {
+                if (g[row * 5 + col] == '1')
+                    fill(r, x + col * scale, y + row * scale,
+                         scale, scale, 255, 255, 255);
+            }
+        }
+    }
+}
+
+static void centerText(SDL_Renderer *r, const char *s, int y, int scale)
+{
+    int width = (int)strlen(s) * 6 * scale;
+    drawText(r, s, (SCREEN_W - width) / 2, y, scale);
+}
+
+static const SDL_Rect platforms[] = {
+    {350,475,76,34}, {590,465,76,34}, {790,500,76,34},
+    {790,405,76,34}, {910,370,76,34}, {1180,470,76,34},
+    {1600,470,76,34},
+    {3040,472,100,32}, {3210,410,100,32}, {3380,468,100,32},
+    {3580,380,100,32}, {3760,445,110,32}, {3970,485,92,32},
+    {4170,420,96,32}, {4370,362,96,32}, {4580,435,96,32},
+    {4790,480,96,32}, {5030,420,96,32}, {5260,390,96,32}
+};
+
+#define PLATFORM_COUNT ((int)(sizeof(platforms)/sizeof(platforms[0])))
+
+static const SDL_Point coinPositions[COIN_COUNT] = {
+    {380,430}, {625,425}, {825,360}, {942,330},
+    {1215,430}, {1630,430}, {2080,455}, {2440,470},
+    {3070,430}, {3240,370}, {3420,425}, {3610,340},
+    {3800,405}, {4000,440}, {4210,380}, {4410,320},
+    {4830,440}, {5290,350}
+};
+
+static void pixelCloud(SDL_Renderer *r, int x, int y)
+{
+    fill(r,x,y+28,140,26,245,250,255);
+    fill(r,x+20,y+8,45,46,245,250,255);
+    fill(r,x+62,y,56,54,245,250,255);
+    fill(r,x+111,y+17,33,38,245,250,255);
+}
+
+static void enemy(SDL_Renderer *r,int x,int y)
+{
+    fill(r,x+6,y+9,40,28,147,91,56);
+    fill(r,x+12,y+2,28,13,147,91,56);
+    fill(r,x+3,y+35,19,10,75,61,58);
+    fill(r,x+29,y+35,19,10,75,61,58);
+    fill(r,x+15,y+19,7,12,255,242,217);
+    fill(r,x+31,y+19,7,12,255,242,217);
+    fill(r,x+18,y+25,3,6,29,35,49);
+    fill(r,x+33,y+25,3,6,29,35,49);
+}
+
+static void brick(SDL_Renderer *r,int x,int y,int w,int h)
+{
+    fill(r,x,y,w,h,188,113,57);
+    fill(r,x,y,w,7,236,162,83);
+    fill(r,x+5,y+12,w-10,4,124,71,49);
+    fill(r,x+w/2,y+17,5,h-19,124,71,49);
+}
+
+static void drawPlayer(SDL_Renderer *renderer, SDL_Texture *sprites[],
+                       int spriteIndex, float x, float y,
+                       int facingRight, int camera)
+{
+    SDL_Rect dst = {(int)x - camera, (int)y, PLAYER_W, PLAYER_H};
+    if (sprites[spriteIndex]) {
+        SDL_RenderCopyEx(renderer, sprites[spriteIndex], NULL, &dst,
+                         0.0, NULL,
+                         facingRight ? SDL_FLIP_NONE : SDL_FLIP_HORIZONTAL);
+    } else {
+        fill(renderer, dst.x, dst.y, dst.w, dst.h, 0, 220, 80);
+    }
+}
+
+static void drawWorld(SDL_Renderer *r, int camera,
+                      const int taken[], int coins)
+{
+    SDL_SetRenderDrawColor(r,109,188,249,255);
+    SDL_RenderClear(r);
+
+    for (int i=0;i<12;i++) {
+        int cx=i*300-(camera/5);
+        pixelCloud(r,cx,85+(i%3)*45);
+    }
+
+    for (int i=0;i<14;i++) {
+        int hx=i*270-camera/3;
+        fill(r,hx,456+(i%2)*30,220,130,109,197,135);
+        fill(r,hx+60,420+(i%2)*30,100,70,109,197,135);
+        fill(r,hx+30,495,220,90,80,168,115);
+    }
+
+    fill(r,0,GROUND_Y,SCREEN_W,SCREEN_H-GROUND_Y,153,97,53);
+    fill(r,0,GROUND_Y,SCREEN_W,19,72,211,83);
+
+    for (int i=0;i<LEVEL_W/64;i++) {
+        int gx=i*64-camera;
+        if(gx>-70 && gx<SCREEN_W) {
+            fill(r,gx+9,630+(i%2)*32,29,9,116,72,45);
+            fill(r,gx+31,GROUND_Y-7,8,7,54,166,69);
+        }
+    }
+
+    int sx=85-camera;
+    fill(r,sx,GROUND_Y-106,8,106,106,73,48);
+    fill(r,sx-21,GROUND_Y-155,116,53,244,221,146);
+    fill(r,sx-17,GROUND_Y-151,108,45,140,92,47);
+    drawText(r,"GO",sx+5,GROUND_Y-139,4);
+    fill(r,sx+58,GROUND_Y-126,26,10,255,233,144);
+    fill(r,sx+75,GROUND_Y-135,12,27,255,233,144);
+
+    for(int i=0;i<PLATFORM_COUNT;i++) {
+        SDL_Rect p=platforms[i];
+        int px=p.x-camera;
+        if(px+p.w<0 || px>SCREEN_W) continue;
+        brick(r,px,p.y,p.w,p.h);
+    }
+
+    int qx=790-camera;
+    fill(r,qx+3,410,70,24,235,185,57);
+    drawText(r,"?",qx+25,413,3);
+
+    for(int i=0;i<COIN_COUNT;i++) {
+        if(taken[i])continue;
+        int cx=coinPositions[i].x-camera;
+        int cy=coinPositions[i].y;
+        fill(r,cx-10,cy-14,20,28,240,161,26);
+        fill(r,cx-5,cy-10,10,20,255,230,75);
+        fill(r,cx-1,cy-7,3,14,240,161,26);
+    }
+
+    enemy(r,1090-camera,GROUND_Y-45);
+
+    brick(r,1790-camera,GROUND_Y-132,175,132);
+    fill(r,1751-camera,GROUND_Y-108,37,55,253,219,115);
+    fill(r,1756-camera,GROUND_Y-103,27,45,154,95,65);
+
+    enemy(r,2260-camera,GROUND_Y-45);
+    enemy(r,3500-camera,GROUND_Y-45);
+    enemy(r,4700-camera,GROUND_Y-45);
+
+    for(int i=0;i<5;i++) {
+        int stepX=2520+i*50-camera;
+        int stepH=(i+1)*30;
+        brick(r,stepX,GROUND_Y-stepH,50,stepH);
+    }
+
+    for (int i=0; i<4; ++i) {
+        int treeX=3030+i*660-camera;
+        fill(r,treeX,GROUND_Y-130,20,130,116,77,47);
+        fill(r,treeX-43,GROUND_Y-203,105,90,45,155,78);
+        fill(r,treeX-23,GROUND_Y-239,65,55,65,183,92);
+    }
+
+    for (int i=0; i<3; ++i) {
+        int pillarX=3860+i*470-camera;
+        brick(r,pillarX,GROUND_Y-72,72,72);
+    }
+
+    for (int i=0; i<4; ++i) {
+        int stepX=5450+i*48-camera;
+        int stepH=(i+1)*34;
+        brick(r,stepX,GROUND_Y-stepH,48,stepH);
+    }
+
+    int flagX=5740-camera;
+    fill(r,flagX,GROUND_Y-310,8,310,240,239,228);
+    fill(r,flagX+8,GROUND_Y-307,76,46,231,77,93);
+    fill(r,flagX+22,GROUND_Y-295,25,11,255,230,142);
+    fill(r,flagX-16,GROUND_Y-16,44,16,165,164,151);
+
+    fill(r,10,12,360,58,33,74,122);
+    drawText(r,"WORLD 1-1",24,27,3);
+    char counter[32];
+    SDL_snprintf(counter,sizeof(counter),"COINS: %d",coins);
+    drawText(r,counter,24,85,3);
+}
+
+static void resetGame(float *x, float *y, float *vy,
+                      int coinsTaken[], int *coinCount,
+                      int *animFrame, int *facingRight)
+{
+    *x = 90.0f;
+    *y = GROUND_Y - PLAYER_H;
+    *vy = 0.0f;
+    *coinCount = 0;
+    *animFrame = 0;
+    *facingRight = 1;
+    memset(coinsTaken, 0, sizeof(int) * COIN_COUNT);
+}
+
+int main(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) return 1;
+
+    SDL_Window *window = SDL_CreateWindow(
+        "SUPER Wii U JUMP",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        SCREEN_W, SCREEN_H, 0
+    );
+
+    if (!window) {
+        SDL_Quit();
+        return 1;
+    }
+
+    SDL_Renderer *renderer =
+        SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+
+    if (!renderer) {
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+
+    /* Boot and course music */
+    SDL_AudioSpec musicSpec, bootSpec;
+    Uint8 *musicBuffer = NULL;
+    Uint8 *bootBuffer = NULL;
+    Uint32 musicLength = 0;
+    Uint32 bootLength = 0;
+    SDL_AudioDeviceID audioDevice = 0;
+
+    int hasMusic = SDL_LoadWAV(
+        "/vol/content/level.wav",
+        &musicSpec, &musicBuffer, &musicLength
+    ) != NULL;
+
+    int hasBoot = SDL_LoadWAV(
+        "/vol/content/boot.wav",
+        &bootSpec, &bootBuffer, &bootLength
+    ) != NULL;
+
+    if (hasMusic || hasBoot) {
+        SDL_AudioSpec wanted = hasMusic ? musicSpec : bootSpec;
+        wanted.callback = NULL;
+
+        audioDevice = SDL_OpenAudioDevice(
+            NULL, 0, &wanted, NULL, 0
+        );
+
+        if (audioDevice != 0) {
+            if (hasBoot &&
+                bootSpec.freq == wanted.freq &&
+                bootSpec.format == wanted.format &&
+                bootSpec.channels == wanted.channels) {
+                SDL_QueueAudio(audioDevice, bootBuffer, bootLength);
+            }
+            SDL_PauseAudioDevice(audioDevice, 0);
+        }
+    }
+
+    /* Two separate characters, seven frames each */
+    const char *spriteSuffix[SPRITE_COUNT] = {
+        "idle", "run1", "run2", "run3",
+        "run4", "jump", "fall"
+    };
+
+    SDL_Texture *characterSprites[2][SPRITE_COUNT] = {{NULL}};
+
+    for (int character = 0; character < 2; character++) {
+        for (int i = 0; i < SPRITE_COUNT; i++) {
+            char path[128];
+
+            SDL_snprintf(
+                path, sizeof(path),
+                "/vol/content/%s_%s.bmp",
+                character == 0 ? "mii" : "undercover",
+                spriteSuffix[i]
+            );
+
+            SDL_Surface *surface = SDL_LoadBMP(path);
+
+            if (surface) {
+                SDL_SetColorKey(
+                    surface, SDL_TRUE,
+                    SDL_MapRGB(surface->format, 255, 0, 255)
+                );
+
+                characterSprites[character][i] =
+                    SDL_CreateTextureFromSurface(renderer, surface);
+
+                SDL_FreeSurface(surface);
+            }
+        }
+    }
+
+    /* Scenes: menu, level, complete, character select */
+    int scene = 0;
+    int selectedCharacter = 0;
+    int running = 1;
+    int facingRight = 1;
+    int animationFrame = 0;
+    int coinCount = 0;
+    int coinsTaken[COIN_COUNT] = {0};
+
+    float x = 90.0f;
+    float y = GROUND_Y - PLAYER_H;
+    float velocityY = 0.0f;
+
+    VPADStatus pad;
+    VPADReadError error;
+    SDL_Event event;
+
+    int musicStarted = 0;
+
+    while (running) {
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT)
+                running = 0;
+        }
+
+        VPADRead(VPAD_CHAN_0, &pad, 1, &error);
+
+        int hold = 0;
+        int trigger = 0;
+        float stickX = 0.0f;
+
+        if (error == VPAD_READ_SUCCESS) {
+            hold = pad.hold;
+            trigger = pad.trigger;
+            stickX = pad.leftStick.x;
+        }
+
+        if (scene == 0) {
+            /* Main menu */
+            SDL_SetRenderDrawColor(renderer, 25, 43, 90, 255);
+            SDL_RenderClear(renderer);
+
+            fill(renderer, 0, 480, SCREEN_W, 240, 66, 151, 92);
+            fill(renderer, 0, 480, SCREEN_W, 15, 125, 223, 103);
+
+            centerText(renderer, "SUPER WII U JUMP", 146, 7);
+            centerText(renderer, "WORLD 1 - 2012", 292, 4);
+            centerText(renderer, "PRESS A TO START", 385, 4);
+            centerText(renderer, "PLUS TO EXIT", 640, 2);
+
+            drawPlayer(
+                renderer, characterSprites[selectedCharacter],
+                0, 610, 492, 1, 0
+            );
+
+            if (trigger & (VPAD_BUTTON_A | VPAD_BUTTON_B))
+                scene = 3;
+
+            if (trigger & VPAD_BUTTON_PLUS)
+                running = 0;
+
+        } else if (scene == 3) {
+            /* Character selection */
+            SDL_SetRenderDrawColor(renderer, 23, 36, 74, 255);
+            SDL_RenderClear(renderer);
+
+            centerText(renderer, "CHOOSE YOUR MII", 72, 6);
+            centerText(renderer, "WORLD 1 - 2012", 151, 3);
+
+            for (int c = 0; c < 2; c++) {
+                int bx = c == 0 ? 230 : 700;
+                int active = selectedCharacter == c;
+
+                fill(
+                    renderer, bx-8, 215, 368, 360,
+                    active ? 255 : 63,
+                    active ? 221 : 84,
+                    active ? 98 : 121
+                );
+
+                fill(renderer, bx, 223, 352, 344, 49, 82, 125);
+                fill(renderer, bx+10, 233, 332, 252, 80, 155, 179);
+                fill(renderer, bx+10, 467, 332, 18, 72, 211, 83);
+
+                SDL_Texture *preview = characterSprites[c][0];
+
+                if (preview) {
+                    SDL_Rect dst = {bx+130, 261, 96, 192};
+                    SDL_RenderCopy(renderer, preview, NULL, &dst);
+                } else {
+                    fill(
+                        renderer, bx+150, 285, 60, 155,
+                        c == 0 ? 95 : 35,
+                        c == 0 ? 221 : 38,
+                        62
+                    );
+                }
+
+                drawText(
+                    renderer,
+                    c == 0 ? "ISAAC MII" : "UNDERCOVER MII",
+                    bx + (c == 0 ? 74 : 23),
+                    516, 3
+                );
+
+                if (active)
+                    drawText(renderer, "SELECTED", bx+83, 593, 3);
+            }
+
+            centerText(renderer, "LEFT RIGHT TO CHOOSE", 640, 3);
+            centerText(renderer, "A TO PLAY  B TO BACK", 679, 2);
+
+            if (trigger & VPAD_BUTTON_LEFT)
+                selectedCharacter = 0;
+
+            if (trigger & VPAD_BUTTON_RIGHT)
+                selectedCharacter = 1;
+
+            if (trigger & (VPAD_BUTTON_B | VPAD_BUTTON_PLUS))
+                scene = 0;
+
+            if (trigger & VPAD_BUTTON_A) {
+                resetGame(
+                    &x, &y, &velocityY, coinsTaken,
+                    &coinCount, &animationFrame, &facingRight
+                );
+                scene = 1;
+                musicStarted = 1;
+            }
+
+        } else if (scene == 1) {
+            /* World 1-1 */
+            if (trigger & VPAD_BUTTON_PLUS) {
+                scene = 0;
+                musicStarted = 0;
+            }
+
+            int left =
+                (hold & VPAD_BUTTON_LEFT) || stickX < -0.25f;
+
+            int right =
+                (hold & VPAD_BUTTON_RIGHT) || stickX > 0.25f;
+
+            int moving = 0;
+
+            if (left && !right) {
+                x -= 5.0f;
+                facingRight = 0;
+                moving = 1;
+            }
+
+            if (right && !left) {
+                x += 5.0f;
+                facingRight = 1;
+                moving = 1;
+            }
+
+            if (x < 0)
+                x = 0;
+
+            if (x > LEVEL_W - PLAYER_W)
+                x = LEVEL_W - PLAYER_W;
+
+            const SDL_Rect solid[] = {
+                {1790,GROUND_Y-132,175,132},
+                {2520,GROUND_Y-30,50,30},
+                {2570,GROUND_Y-60,50,60},
+                {2620,GROUND_Y-90,50,90},
+                {2670,GROUND_Y-120,50,120},
+                {2720,GROUND_Y-150,50,150},
+                {3860,GROUND_Y-72,72,72},
+                {4330,GROUND_Y-72,72,72},
+                {4800,GROUND_Y-72,72,72},
+                {5450,GROUND_Y-34,48,34},
+                {5498,GROUND_Y-68,48,68},
+                {5546,GROUND_Y-102,48,102},
+                {5594,GROUND_Y-136,48,136}
+            };
+
+            const int solidCount =
+                (int)(sizeof(solid) / sizeof(solid[0]));
+
+            float oldBottom = y + PLAYER_H;
+
+            int grounded =
+                velocityY >= 0 &&
+                oldBottom >= GROUND_Y - 1 &&
+                oldBottom <= GROUND_Y + 2;
+
+            for (int i = 0; i < PLATFORM_COUNT + solidCount; ++i) {
+                SDL_Rect p =
+                    i < PLATFORM_COUNT
+                    ? platforms[i]
+                    : solid[i - PLATFORM_COUNT];
+
+                if (velocityY >= 0 &&
+                    x + PLAYER_W > p.x &&
+                    x < p.x + p.w &&
+                    oldBottom >= p.y - 2 &&
+                    oldBottom <= p.y + 3)
+                    grounded = 1;
+            }
+
+            if (grounded &&
+                (trigger & (VPAD_BUTTON_A | VPAD_BUTTON_B)))
+                velocityY = -15.5f;
+
+            velocityY += 0.55f;
+
+            if (velocityY > 15.0f)
+                velocityY = 15.0f;
+
+            y += velocityY;
+
+            if (velocityY >= 0) {
+                float landingY = GROUND_Y - PLAYER_H;
+
+                for (int i = 0;
+                     i < PLATFORM_COUNT + solidCount;
+                     ++i) {
+
+                    SDL_Rect p =
+                        i < PLATFORM_COUNT
+                        ? platforms[i]
+                        : solid[i - PLATFORM_COUNT];
+
+                    if (x + PLAYER_W > p.x &&
+                        x < p.x + p.w &&
+                        oldBottom <= p.y + 3 &&
+                        y + PLAYER_H >= p.y &&
+                        p.y - PLAYER_H < landingY)
+                        landingY = p.y - PLAYER_H;
+                }
+
+                if (y >= landingY) {
+                    y = landingY;
+                    velocityY = 0;
+                }
+            }
+
+            const int enemies[] = {
+                1090, 2260, 3500, 4700
+            };
+
+            for (int i = 0; i < 4; i++) {
+                int ex = enemies[i];
+
+                if (x + PLAYER_W > ex + 5 &&
+                    x < ex + 47 &&
+                    y + PLAYER_H > GROUND_Y - 44 &&
+                    y < GROUND_Y) {
+
+                    resetGame(
+                        &x, &y, &velocityY, coinsTaken,
+                        &coinCount, &animationFrame, &facingRight
+                    );
+                    break;
+                }
+            }
+
+            int airborne = velocityY != 0.0f;
+
+            if (moving && !airborne)
+                animationFrame++;
+            else
+                animationFrame = 0;
+
+            int spriteIndex =
+                airborne ? (velocityY < 0 ? 5 : 6)
+                : (moving ? 1 + ((animationFrame / 6) % 4) : 0);
+
+            for (int i = 0; i < COIN_COUNT; i++) {
+                int cx = coinPositions[i].x;
+                int cy = coinPositions[i].y;
+
+                if (!coinsTaken[i] &&
+                    x < cx + 13 &&
+                    x + PLAYER_W > cx - 13 &&
+                    y < cy + 15 &&
+                    y + PLAYER_H > cy - 15) {
+
+                    coinsTaken[i] = 1;
+                    coinCount++;
+                }
+            }
+
+            int camera = (int)x - 350;
+
+            if (camera < 0)
+                camera = 0;
+
+            if (camera > LEVEL_W - SCREEN_W)
+                camera = LEVEL_W - SCREEN_W;
+
+            drawWorld(renderer, camera, coinsTaken, coinCount);
+
+            drawPlayer(
+                renderer,
+                characterSprites[selectedCharacter],
+                spriteIndex, x, y, facingRight, camera
+            );
+
+            if (x + PLAYER_W > 5740 && x < 5790)
+                scene = 2;
+
+        } else {
+            /* Level complete */
+            SDL_SetRenderDrawColor(renderer, 31, 75, 82, 255);
+            SDL_RenderClear(renderer);
+
+            centerText(renderer, "LEVEL COMPLETE!", 178, 6);
+            centerText(renderer, "WORLD 1-1 CLEARED", 315, 4);
+
+            char result[32];
+            SDL_snprintf(
+                result, sizeof(result),
+                "COINS: %d", coinCount
+            );
+
+            centerText(renderer, result, 400, 4);
+            centerText(renderer, "A TO MENU", 565, 3);
+
+            if (trigger &
+                (VPAD_BUTTON_A | VPAD_BUTTON_B | VPAD_BUTTON_PLUS))
+                scene = 0;
+        }
+
+        if (audioDevice != 0 &&
+            hasMusic &&
+            musicStarted &&
+            musicSpec.freq == (hasBoot ? bootSpec.freq : musicSpec.freq) &&
+            (!hasBoot ||
+             (musicSpec.format == bootSpec.format &&
+              musicSpec.channels == bootSpec.channels))) {
+
+            if (SDL_GetQueuedAudioSize(audioDevice) < musicLength)
+                SDL_QueueAudio(audioDevice, musicBuffer, musicLength);
+        }
+
+        SDL_RenderPresent(renderer);
+        SDL_Delay(16);
+    }
+
+    for (int c = 0; c < 2; c++) {
+        for (int i = 0; i < SPRITE_COUNT; i++) {
+            if (characterSprites[c][i])
+                SDL_DestroyTexture(characterSprites[c][i]);
+        }
+    }
+
+    if (audioDevice != 0)
+        SDL_CloseAudioDevice(audioDevice);
+
+    if (bootBuffer)
+        SDL_FreeWAV(bootBuffer);
+
+    if (musicBuffer)
+        SDL_FreeWAV(musicBuffer);
+
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}

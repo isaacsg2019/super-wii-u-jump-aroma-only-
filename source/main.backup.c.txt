@@ -1,0 +1,42 @@
+
+#include <coreinit/thread.h>
+#include <coreinit/time.h>
+
+#include <whb/log.h>
+#include <whb/log_console.h>
+#include <whb/proc.h>
+
+int main(int argc, char **argv)
+{
+    int frames = 0;
+
+    WHBProcInit();
+    WHBLogConsoleInit();
+
+    WHBLogPrintf("============================");
+    WHBLogPrintf("       SUPER Wii U JUMP");
+    WHBLogPrintf("          v0.1 ALPHA");
+    WHBLogPrintf("============================");
+    WHBLogPrintf("");
+    WHBLogPrintf("WORLD 1 - 2012");
+    WHBLogPrintf("LEVEL 1-1");
+    WHBLogPrintf("");
+    WHBLogPrintf("Initializing game...");
+    WHBLogPrintf("Developer build - October 2026");
+
+    while (WHBProcIsRunning()) {
+        frames++;
+
+        if (frames % 60 == 0) {
+            WHBLogPrintf("Game running! Tick: %d", frames);
+        }
+
+        WHBLogConsoleDraw();
+        OSSleepTicks(OSMillisecondsToTicks(16));
+    }
+
+    WHBLogConsoleFree();
+    WHBProcShutdown();
+
+    return 0;
+}

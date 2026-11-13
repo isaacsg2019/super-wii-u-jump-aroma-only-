@@ -1,0 +1,78 @@
+
+#include <coreinit/thread.h>
+#include <coreinit/time.h>
+
+#include <vpad/input.h>
+#include <whb/log.h>
+#include <whb/log_console.h>
+#include <whb/proc.h>
+
+int main(int argc, char **argv)
+{
+    VPADStatus gamepad;
+    VPADReadError error;
+
+    float playerX = 100.0f;
+    float playerY = 0.0f;
+    float velocityY = 0.0f;
+
+    const float speed = 3.0f;
+    const float gravity = 0.35f;
+    const float jumpPower = 7.0f;
+
+    WHBProcInit();
+    WHBLogConsoleInit();
+
+    WHBLogPrintf("SUPER Wii U JUMP - v0.1");
+    WHBLogPrintf("GAMEPAD MOVEMENT TEST");
+
+    while (WHBProcIsRunning()) {
+        VPADRead(VPAD_CHAN_0, &gamepad, 1, &error);
+
+        if (error == VPAD_READ_SUCCESS) {
+            int left = (gamepad.hold & VPAD_BUTTON_LEFT) ||
+                       (gamepad.leftStick.x < -0.25f);
+
+            int right = (gamepad.hold & VPAD_BUTTON_RIGHT) ||
+                        (gamepad.leftStick.x > 0.25f);
+
+            if (left && !right) {
+                playerX -= speed;
+            }
+
+            if (right && !left) {
+                playerX += speed;
+            }
+
+            if ((gamepad.trigger &
+                 (VPAD_BUTTON_A | VPAD_BUTTON_B)) &&
+                 playerY == 0.0f) {
+                velocityY = jumpPower;
+            }
+        }
+
+        playerY += velocityY;
+        velocityY -= gravity;
+
+        if (playerY < 0.0f) {
+            playerY = 0.0f;
+            velocityY = 0.0f;
+        }
+
+    static int displayCounter = 0;
+displayCounter++;
+
+if (displayCounter >= 30) {
+    WHBLogPrintf("PLAYER X: %.1f  Y: %.1f",
+                 playerX, playerY);
+    displayCounter = 0;
+}
+
+WHBLogConsoleDraw();
+OSSleepTicks(OSMillisecondsToTicks(16));    }
+
+    WHBLogConsoleFree();
+    WHBProcShutdown();
+
+    return 0;
+}
